@@ -40,24 +40,32 @@ class BodyOnlyTab(IMessageEditorTab):
             return
 
         try:
-            response_str = content.tostring()
+            response_bytes = content.getResponse() if hasattr(content, 'getResponse') else content
+            if response_bytes is None:
+                self._editor.setMessage(None, False)
+                return
 
-            # Extract body from full response
+            response_str = response_bytes.tostring()
             header_end = response_str.index("\r\n\r\n")
+            headers = response_str[:header_end]
             body = response_str[header_end + 4:]
 
-            # Remove Facebook guard (e.g., for (;;);)
             body = re.sub(r"^for\s*\(;;\);", "", body)
 
-            # Try to parse just the JSON body
             if body.strip().startswith("{") or body.strip().startswith("["):
+                content_type = "application/json"
+                for line in headers.split("\r\n"):
+                    if line.lower().startswith("content-type:"):
+                        content_type = line.split(":", 1)[1].strip()
+                        break
+
                 fake_headers = (
                     "HTTP/1.1 200 OK\r\n"
-                    "Content-Type: application/json\r\n"
+                    "Content-Type: {}\r\n"
                     "Content-Length: {}\r\n\r\n"
-                ).format(len(body.encode("utf-8")))
+                ).format(content_type, len(body.encode("utf-8")))
                 fake_response = fake_headers + body
-                self._editor.setMessage(fake_response.encode(), False)
+                self._editor.setMessage(fake_response.encode("utf-8"), False)
             else:
                 self._editor.setMessage(None, False)
         except Exception:
