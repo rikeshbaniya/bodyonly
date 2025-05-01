@@ -44,74 +44,41 @@ class BodyOnlyTab(IMessageEditorTab):
             return
 
         try:
-            # Convert byte array to string
             response_str = self._helpers.bytesToString(content)
-            
-            # Find the header/body separator
             header_end = self._findHeaderEnd(response_str)
             if header_end == -1:
                 self._editor.setMessage(None, False)
                 return
 
             body = response_str[header_end:]
-            
-            # Remove JSON guards (Facebook, Google, etc.)
             body = self._removeJsonGuards(body).strip()
-            
-            # Try to parse as JSON
+
             if self._isJson(body):
                 try:
                     json_obj = json.loads(body)
                     pretty_json = json.dumps(json_obj, indent=2, ensure_ascii=False)
-                    
-                    # Create fake response with pretty JSON and correct content type
-                    fake_response = (
-                        "HTTP/1.1 200 OK\r\n"
-                        "Content-Type: application/json\r\n"
-                        "Content-Length: {}\r\n\r\n"
-                        "{}"
-                    ).format(len(pretty_json.encode('utf-8')), pretty_json)
-                    
-                    self._editor.setMessage(self._helpers.stringToBytes(fake_response), False)
-                    return
                 except ValueError as e:
                     self._callbacks.printError("JSON parsing error: " + str(e))
-            
-            # If not JSON or parsing failed, show raw body but still try to pretty print if it looks like JSON
-            if self._looksLikeJson(body):
-                try:
-                    json_obj = json.loads(body)
-                    pretty_json = json.dumps(json_obj, indent=2, ensure_ascii=False)
-                    content_type = "application/json"
-                except:
                     pretty_json = body
-                    content_type = "text/plain"
             else:
                 pretty_json = body
-                content_type = "text/plain"
-            
+
+            # Force Content-Type to application/json always
             fake_response = (
                 "HTTP/1.1 200 OK\r\n"
-                "Content-Type: {}\r\n"
+                "Content-Type: application/json\r\n"
                 "Content-Length: {}\r\n\r\n"
                 "{}"
-            ).format(content_type, len(pretty_json.encode('utf-8')), pretty_json)
-            
+            ).format(len(pretty_json.encode('utf-8')), pretty_json)
+
             self._editor.setMessage(self._helpers.stringToBytes(fake_response), False)
-            
+
         except Exception as e:
             self._callbacks.printError("BodyOnlyTab error: " + str(e))
             self._editor.setMessage(None, False)
 
     def _findHeaderEnd(self, response_str):
-        """Find the end of HTTP headers using various possible separators"""
-        patterns = [
-            '\r\n\r\n',  # Standard HTTP
-            '\n\n',      # Some servers
-            '\r\n\n',    # Mixed
-            '\n\r\n'     # Rare but possible
-        ]
-        
+        patterns = ['\r\n\r\n', '\n\n', '\r\n\n', '\n\r\n']
         for pattern in patterns:
             pos = response_str.find(pattern)
             if pos != -1:
@@ -119,25 +86,16 @@ class BodyOnlyTab(IMessageEditorTab):
         return -1
 
     def _removeJsonGuards(self, body):
-        """Remove common JSON guards like Facebook's for(;;);"""
         guards = [
-            r'^\s*for\s*\(\s*;\s*;\s*\)\s*;\s*',  # Facebook
-            r'^\s*while\s*\(\s*1\s*\)\s*;\s*',    # Others
-            r'^\s*\)\]\}\'\s*',                   # Google
-            r'^\s*/\*\*/\s*'                      # Some APIs
+            r'^\s*for\s*\(\s*;\s*;\s*\)\s*;\s*',
+            r'^\s*while\s*\(\s*1\s*\)\s*;\s*',
+            r'^\s*\)\]\}\'\s*',
+            r'^\s*/\*\*/\s*'
         ]
-        
         for guard in guards:
             body = re.sub(guard, '', body)
-        
         return body
 
     def _isJson(self, body):
-        """Check if string is valid JSON"""
         body = body.strip()
         return body.startswith('{') or body.startswith('[')
-
-    def _looksLikeJson(self, body):
-        """Check if string looks like JSON (even if malformed)"""
-        body = body.strip()
-        return (body.startswith('{') and body.endswith('}')) or (body.startswith('[') and body.endswith(']'))
